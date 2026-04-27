@@ -3,126 +3,221 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Site Walk - Field App</title>
+    <title>Site Walk - Multi Camera</title>
     
-    <!-- External Libraries -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.css"/>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.js"></script>
 
     <style>
-        body, html { margin: 0; padding: 0; height: 100%; font-family: sans-serif; overflow: hidden; }
+        body, html { margin: 0; padding: 0; height: 100%; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; overflow: hidden; }
         #app-container { display: flex; flex-direction: column; height: 100vh; }
-        
-        /* Map Section (Top) */
-        #map { flex: 1; background: #f0f0f0; border-bottom: 3px solid #333; position: relative; }
-        
-        /* Viewer Section (Bottom) */
-        #viewer-container { flex: 1; background: #000; position: relative; }
+        #map { flex: 1; background: #e5e5e5; position: relative; border-bottom: 4px solid #2c3e50; }
+        #viewer-container { flex: 1; background: #000; }
         #panorama { width: 100%; height: 100%; }
 
         /* UI Overlays */
-        .controls { position: absolute; top: 10px; right: 10px; z-index: 1000; display: flex; gap: 5px; }
-        .btn { background: white; padding: 12px 20px; border-radius: 8px; font-weight: bold; cursor: pointer; border: 2px solid #333; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-        .btn:active { background: #eee; transform: translateY(2px); }
-        .status-pill { position: absolute; bottom: 10px; left: 10px; background: rgba(0,0,0,0.7); color: white; padding: 5px 12px; border-radius: 20px; font-size: 12px; z-index: 1000; }
+        .controls-top { position: absolute; top: 15px; right: 15px; z-index: 1000; display: flex; flex-direction: column; gap: 10px; }
+        .floor-selector { position: absolute; top: 15px; left: 50px; z-index: 1000; background: white; padding: 10px; border-radius: 8px; border: 2px solid #2c3e50; box-shadow: 0 4px 10px rgba(0,0,0,0.2); }
+        .btn { background: #2c3e50; color: white; padding: 12px 18px; border-radius: 6px; font-weight: bold; cursor: pointer; border: none; text-align: center; }
+        .btn-secondary { background: #7f8c8d; }
+        
+        .status-bar { position: absolute; bottom: 10px; left: 10px; background: rgba(0,0,0,0.8); color: #2ecc71; padding: 6px 15px; border-radius: 20px; font-size: 13px; font-weight: bold; z-index: 1000; }
+        
+        select { padding: 8px; font-size: 16px; border-radius: 4px; border: 1px solid #ccc; width: 150px; }
+        #loading { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: white; z-index: 9999; display: flex; justify-content: center; align-items: center; font-size: 20px; font-weight: bold; }
     </style>
 </head>
 <body>
 
+<!-- Hidden File Input for Native Camera -->
+<input type="file" accept="image/*" capture="environment" id="cameraInput" style="display:none;" onchange="process2DPhoto(event)">
+
+<div id="loading">Loading Project Data from Google Sheets...</div>
+
 <div id="app-container">
-    <!-- TOP: Floor Plan -->
     <div id="map">
-        <div class="controls">
-            <div class="btn" onclick="toggleMode()">MODE: CAPTURE</div>
+        <div class="floor-selector">
+            <label style="display:block; font-size: 11px; font-weight: bold; margin-bottom: 4px;">PROJECT FLOOR</label>
+            <select id="floorSelect" onchange="changeFloor()"></select>
         </div>
-        <div id="status" class="status-pill">System Ready</div>
+
+        <div class="controls-top">
+            <button class="btn" id="modeBtn" onclick="toggleMode()">MODE: 360 CAPTURE</button>
+            <button class="btn btn-secondary" onclick="syncPhotos()">BATCH SYNC (360)</button>
+        </div>
+        
+        <div id="status" class="status-bar">System Connected</div>
     </div>
 
-    <!-- BOTTOM: 360 Viewer -->
     <div id="viewer-container">
         <div id="panorama"></div>
     </div>
 </div>
 
 <script>
-    // 1. GET PROJECT CONFIG FROM URL (e.g. ?api=ID&plan=URL)
     const urlParams = new URLSearchParams(window.location.search);
     const SCRIPT_URL = urlParams.get('api'); 
-    const PLAN_IMAGE = urlParams.get('plan') || 'https://via.placeholder.com/1000x800?text=Upload+Floorplan+to+Drive';
-
-    let isCaptureMode = true;
-
-    // 2. INITIALIZE LEAFLET (Floor Plan)
+    
+    let floors = [];
+    let currentFloorIndex = 0;
+    
+    // Modes: "360", "2D", "VIEW"
+    let currentMode = "360"; 
+    
+    let planOverlay = null;
+    let markers = [];
+    let pendingPin = {}; // Stores location while 2D photo is taken
+    
     var map = L.map('map', { crs: L.CRS.Simple, minZoom: -2 });
-    var bounds = [[0,0], [1000,1000]]; // Arbitrary coordinate grid
-    L.imageOverlay(PLAN_IMAGE, bounds).addTo(map);
-    map.fitBounds(bounds);
+    var bounds = [[0,0], [1000,1000]];
 
-    // 3. INITIALIZE PANNELLUM (360 Viewer)
-    var viewer = pannellum.viewer('panorama', {
-        "type": "equirectangular",
-        "panorama": "https://pannellum.org/images/alma.jpg", // Default placeholder
-        "autoLoad": true
-    });
+    if (!SCRIPT_URL) {
+        document.getElementById('loading').innerText = "Error: Missing ?api= in URL";
+    } else {
+        fetch(SCRIPT_URL)
+            .then(response => response.json())
+            .then(data => { floors = data.floors; initializeApp(); })
+            .catch(err => {
+                document.getElementById('loading').innerText = "Failed to load project data. Check URL.";
+                console.error(err);
+            });
+    }
 
-    // 4. TAP TO CAPTURE LOGIC
+    function initializeApp() {
+        document.getElementById('loading').style.display = 'none';
+        const select = document.getElementById('floorSelect');
+        floors.forEach((f, i) => {
+            let opt = document.createElement('option');
+            opt.value = i;
+            opt.innerText = f.name;
+            select.appendChild(opt);
+        });
+        loadFloor(0);
+    }
+
+    function loadFloor(index) {
+        if(planOverlay) map.removeLayer(planOverlay);
+        markers.forEach(m => map.removeLayer(m));
+        markers = [];
+        currentFloorIndex = index;
+        planOverlay = L.imageOverlay(floors[index].url, bounds).addTo(map);
+        map.fitBounds(bounds);
+        updateStatus("Switched to " + floors[index].name);
+    }
+
+    function changeFloor() {
+        loadFloor(document.getElementById('floorSelect').value);
+    }
+
+    // MAIN TAP INTERACTION
     map.on('click', function(e) {
-        if (!isCaptureMode) return;
+        if (currentMode === "VIEW") return;
 
-        let name = prompt("Enter Pin Name (e.g. Room 101):");
+        let name = prompt("Name this pin for " + floors[currentFloorIndex].name + ":");
         if (!name) return;
 
         let id = Date.now();
-        updateStatus("Triggering Camera...");
 
-        // A. TRIGGER CAMERA (RICOH/INSTA360 OSC API)
-        // Note: This may throw a CORS error in browser, but the camera still receives the command.
-        fetch('http://192.168.1.1/osc/commands/execute', {
-            method: 'POST',
-            mode: 'no-cors',
-            body: JSON.stringify({ name: "camera.takePicture" })
-        });
+        if (currentMode === "360") {
+            updateStatus("Triggering 360 Camera...");
+            
+            // 1. OSC Trigger to Ricoh/Insta360
+            fetch('http://192.168.1.1/osc/commands/execute', {
+                method: 'POST', mode: 'no-cors',
+                body: JSON.stringify({ name: "camera.takePicture" })
+            });
 
-        // B. SAVE TO GOOGLE SHEET (VIA GAS)
-        fetch(SCRIPT_URL, {
-            method: 'POST',
-            mode: 'no-cors',
-            body: JSON.stringify({ action: "create", id: id, name: name, x: e.latlng.lng, y: e.latlng.lat })
-        }).then(() => updateStatus("Saved: " + name));
+            // 2. Save location to Sheets (Photo stays on camera for batch sync)
+            fetch(SCRIPT_URL, {
+                method: 'POST', mode: 'no-cors',
+                body: JSON.stringify({ action: "create", id: id, name: name, floor: floors[currentFloorIndex].name, x: e.latlng.lng, y: e.latlng.lat })
+            }).then(() => updateStatus("Pinned: " + name));
 
-        // C. ADD MARKER TO MAP
-        addMarker(id, e.latlng, name);
+            addMarker(id, e.latlng, name, "360");
+            
+        } else if (currentMode === "2D") {
+            // Save info temporarily and open device camera
+            pendingPin = { id: id, name: name, latlng: e.latlng };
+            document.getElementById('cameraInput').click();
+        }
     });
 
-    function addMarker(id, latlng, name) {
-        let m = L.marker(latlng, { draggable: true }).addTo(map);
-        m.bindPopup("<b>" + name + "</b>");
+    // HANDLE 2D CAMERA UPLOAD
+    function process2DPhoto(event) {
+        const file = event.target.files[0];
+        if (!file) return;
 
-        m.on('dragend', function() {
-            let newPos = m.getLatLng();
-            updateStatus("Updating Position...");
+        updateStatus("Uploading 2D Photo to Drive...");
+        
+        // Convert image to Base64 so it can be sent as text
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            const base64Image = e.target.result;
+            
             fetch(SCRIPT_URL, {
                 method: 'POST',
                 mode: 'no-cors',
-                body: JSON.stringify({ action: "update", id: id, x: newPos.lng, y: newPos.lat })
-            }).then(() => updateStatus("Position Updated"));
-        });
+                body: JSON.stringify({
+                    action: "create_2d",
+                    id: pendingPin.id,
+                    name: pendingPin.name,
+                    floor: floors[currentFloorIndex].name,
+                    x: pendingPin.latlng.lng,
+                    y: pendingPin.latlng.lat,
+                    image: base64Image,
+                    mimeType: file.type
+                })
+            }).then(() => {
+                updateStatus("2D Photo Saved to Drive!");
+                addMarker(pendingPin.id, pendingPin.latlng, pendingPin.name, "2D");
+                document.getElementById('cameraInput').value = ""; // Reset input
+            });
+        };
+        reader.readAsDataURL(file);
+    }
 
-        m.on('click', function() {
-            // In a real project, we'd fetch the Drive photo link from the Sheet
-            updateStatus("Viewing: " + name);
+    function addMarker(id, latlng, name, type) {
+        let m = L.marker(latlng, { draggable: true }).addTo(map);
+        let tag = type === "2D" ? "📸" : "🌐";
+        m.bindPopup(`<b>${tag} ${name}</b>`);
+        markers.push(m);
+
+        m.on('dragend', function() {
+            let pos = m.getLatLng();
+            fetch(SCRIPT_URL, {
+                method: 'POST', mode: 'no-cors',
+                body: JSON.stringify({ action: "update", id: id, x: pos.lng, y: pos.lat })
+            });
+            updateStatus("Position Updated");
         });
     }
 
     function toggleMode() {
-        isCaptureMode = !isCaptureMode;
-        document.querySelector('.btn').innerText = isCaptureMode ? "MODE: CAPTURE" : "MODE: VIEW";
+        let btn = document.getElementById('modeBtn');
+        if (currentMode === "360") {
+            currentMode = "2D";
+            btn.innerText = "MODE: 2D PHOTO";
+            btn.style.background = "#8e44ad"; // Purple for 2D
+        } else if (currentMode === "2D") {
+            currentMode = "VIEW";
+            btn.innerText = "MODE: VIEW";
+            btn.style.background = "#e67e22"; // Orange for View
+        } else {
+            currentMode = "360";
+            btn.innerText = "MODE: 360 CAPTURE";
+            btn.style.background = "#2c3e50"; // Blue for 360
+        }
     }
 
     function updateStatus(msg) {
         document.getElementById('status').innerText = msg;
+        setTimeout(() => document.getElementById('status').innerText = "System Ready", 5000);
+    }
+
+    function syncPhotos() {
+        alert("Ensure iPad Hotspot is ON and 360 Camera is connected to it.\nBatch sync will start now.");
     }
 </script>
 
