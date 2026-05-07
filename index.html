@@ -14,16 +14,22 @@
         body, html { margin: 0; padding: 0; height: 100%; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; overflow: hidden; }
         #app-container { display: flex; flex-direction: column; height: 100vh; }
         
-        /* NEW TOP BAR DESIGN */
+        /* TOP BAR DESIGN */
         .top-bar { display: flex; justify-content: space-between; align-items: center; background: #2c3e50; color: white; padding: 10px 15px; box-shadow: 0 2px 10px rgba(0,0,0,0.3); z-index: 1001; flex-wrap: wrap; gap: 10px; }
         .top-bar-group { display: flex; align-items: center; gap: 10px; }
         .top-bar label { font-size: 12px; font-weight: bold; color: #bdc3c7; text-transform: uppercase; letter-spacing: 1px; }
         .top-bar select { padding: 8px 12px; font-size: 14px; border-radius: 6px; border: 1px solid #34495e; background: #ecf0f1; color: #2c3e50; font-weight: bold; cursor: pointer; outline: none; }
         .top-bar select:focus { border-color: #3498db; }
         
-        #map { flex: 1; background: #e5e5e5; position: relative; border-bottom: 4px solid #2c3e50; }
-        #viewer-container { flex: 1; background: #000; }
-        #panorama { width: 100%; height: 100%; }
+        /* MAIN WORKSPACE (LEFT/RIGHT SPLIT) */
+        #main-content { display: flex; flex: 1; overflow: hidden; }
+        #map { flex: 1; background: #e5e5e5; position: relative; transition: width 0.3s; }
+        
+        /* NEW RIGHT-HAND VIEWER PANEL */
+        #viewer-container { display: none; width: 40%; min-width: 350px; background: #000; position: relative; border-left: 4px solid #2c3e50; flex-direction: column; }
+        #panorama { width: 100%; height: 100%; display: none; }
+        .close-viewer-btn { position: absolute; top: 15px; left: 15px; background: rgba(0,0,0,0.6); color: white; border: 2px solid white; border-radius: 50%; width: 35px; height: 35px; font-weight: bold; cursor: pointer; z-index: 1000; font-size: 16px; display: flex; justify-content: center; align-items: center; transition: background 0.2s; }
+        .close-viewer-btn:hover { background: #e74c3c; border-color: #e74c3c; }
 
         /* UI Overlays */
         .btn { background: #34495e; color: white; padding: 10px 16px; border-radius: 6px; font-weight: bold; cursor: pointer; border: none; text-align: center; font-size: 13px; transition: background 0.2s; }
@@ -36,7 +42,6 @@
         
         #loading { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: white; z-index: 9999; display: flex; justify-content: center; align-items: center; font-size: 20px; font-weight: bold; }
         
-        /* Removes Leaflet's default white square from custom icons */
         .custom-svg-pin { background: transparent; border: none; }
         
         /* Custom Modal Styling */
@@ -73,15 +78,15 @@
 
 <div id="app-container">
     
-    <!-- NEW UNIFIED TOP NAVIGATION BAR -->
+    <!-- TOP NAVIGATION BAR -->
     <div class="top-bar">
         <!-- Left: Floor Selection -->
         <div class="top-bar-group">
             <label>Floor</label>
             <select id="floorSelect" onchange="changeFloor()"></select>
         </div>
-        
-        <!-- Center: Filters -->
+
+        <!-- Right: Filters, Role & Actions -->
         <div class="top-bar-group">
             <label>Filter</label>
             <select id="pinFilter" onchange="applyFilter()">
@@ -90,10 +95,7 @@
                 <option value="2D">📸 2D Photos Only</option>
                 <option value="360">🌐 360 Photos Only</option>
             </select>
-        </div>
-
-        <!-- Right: Role & Actions -->
-        <div class="top-bar-group">
+            
             <select id="roleSelect" onchange="changeRole()" style="background:#f39c12; color:white; border:none;">
                 <option value="TEAM">🛠️ Role: Team (Edit)</option>
                 <option value="SUB">👁️ Role: Sub (View)</option>
@@ -103,20 +105,26 @@
         </div>
     </div>
 
-    <div id="map">
-        <div id="status" class="status-bar">System Connected</div>
-    </div>
+    <!-- MAIN WORKSPACE -->
+    <div id="main-content">
+        <!-- Map Container -->
+        <div id="map">
+            <div id="status" class="status-bar">System Connected</div>
+        </div>
 
-    <div id="viewer-container">
-        <div id="panorama"></div>
-        <img id="photo-viewer" style="display:none; width:100%; height:100%; object-fit:contain; background:#111;" />
+        <!-- Side Panel Viewer -->
+        <div id="viewer-container">
+            <button class="close-viewer-btn" onclick="closeViewer()" title="Close Viewer">✕</button>
+            <div id="panorama"></div>
+            <img id="photo-viewer" style="display:none; width:100%; height:100%; object-fit:contain; background:#111;" />
+        </div>
     </div>
 </div>
 
 <script>
     const urlParams = new URLSearchParams(window.location.search);
     const SCRIPT_URL = urlParams.get('api'); 
-    const URL_ROLE = urlParams.get('role'); // NEW: Check the URL for a role assignment
+    const URL_ROLE = urlParams.get('role'); 
     
     let floors = [];
     let allPins = []; 
@@ -127,12 +135,9 @@
     let pendingPin = {}; 
     let isAddingPin = false; 
     
-    // NEW STATE VARIABLES
-    // SECURITY UPDATE: Default to SUB unless the secret envisioncs tag is used
     let userRole = (URL_ROLE && URL_ROLE.toLowerCase() === 'envisioncs') ? 'TEAM' : 'SUB'; 
-    let currentFilter = 'ALL'; // 'ALL', 'EMPTY', '2D', '360'
+    let currentFilter = 'ALL'; 
     
-    // True SVG Map Pins with custom inner icons
     const createSvgPin = (innerPath, bgColor) => {
         const svgString = `
             <svg width="36" height="48" viewBox="0 0 24 32" xmlns="http://www.w3.org/2000/svg">
@@ -155,9 +160,9 @@
     const path2D = `<path d="M20 6h-3.17L15 4H9L7.17 6H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm-8 11c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.65 0-3 1.35-3 3s1.35 3 3 3 3-1.35 3-3-1.35-3-3-3z" fill="#ffffff"/>`;
     const path360 = `<path d="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M12,4.04C14.43,4.04 16.5,5.65 17.5,7.7H14.86C14.4,6.29 13.33,5.08 12,4.04M9.14,7.7H6.5C7.5,5.65 9.57,4.04 12,4.04C10.67,5.08 9.6,6.29 9.14,7.7M12,19.96C13.33,18.92 14.4,17.71 14.86,16.3H17.5C16.5,18.35 14.43,19.96 12,19.96M6.5,16.3H9.14C9.6,17.71 10.67,18.92 12,19.96C9.57,19.96 7.5,18.35 6.5,16.3M4.26,14C4.09,13.36 4,12.69 4,12C4,11.31 4.09,10.64 4.26,10H8.38C8.28,10.64 8.2,11.31 8.2,12C8.2,12.69 8.28,13.36 8.38,14H4.26M19.74,14H15.62C15.72,13.36 15.8,12.69 15.8,12C15.8,11.31 15.72,10.64 15.62,10H19.74C19.91,10.64 20,11.31 20,12C20,12.69 19.91,13.36 19.74,14M9.54,14H14.46C14.56,13.36 14.65,12.69 14.65,12C14.65,11.31 14.56,10.64 14.46,10H9.54C9.44,10.64 9.35,11.31 9.35,12C9.35,12.69 9.44,13.36 9.54,14Z" fill="#ffffff"/>`;
 
-    const emptyIcon = createSvgPin(pathEmpty, '#e74c3c'); // Red
-    const icon2D = createSvgPin(path2D, '#8e44ad');       // Purple
-    const icon360 = createSvgPin(path360, '#2980b9');     // Blue
+    const emptyIcon = createSvgPin(pathEmpty, '#e74c3c'); 
+    const icon2D = createSvgPin(path2D, '#8e44ad');       
+    const icon360 = createSvgPin(path360, '#2980b9');     
 
     var map = L.map('map', { crs: L.CRS.Simple, minZoom: -2, doubleClickZoom: false });
 
@@ -187,31 +192,26 @@
             select.appendChild(opt);
         });
 
-        // NEW: Enforce Role Lock on Startup
         document.getElementById('roleSelect').value = userRole;
         if (userRole === 'SUB') {
-            document.getElementById('roleSelect').style.display = 'none'; // Hide the switcher so subs cannot change it
+            document.getElementById('roleSelect').style.display = 'none';
         }
-        changeRole(); // Apply the UI visibility rules instantly
+        changeRole();
 
         loadFloor(0);
     }
 
-    // NEW FUNCTION: Role Management Toggle
     function changeRole() {
         userRole = document.getElementById('roleSelect').value;
         
-        // Hide/Show actionable buttons based on role
         document.getElementById('addPinBtn').style.display = (userRole === 'TEAM') ? 'block' : 'none';
         document.getElementById('syncBtn').style.display = (userRole === 'TEAM') ? 'block' : 'none';
         
-        // Disarm pin adding tool if switching roles
         if (userRole === 'SUB') {
             isAddingPin = false;
             document.getElementById('map').style.cursor = '';
         }
 
-        // Loop through active map markers to update their popups and dragging abilities
         markers.forEach(m => {
             if (userRole === 'TEAM') m.dragging.enable();
             else m.dragging.disable();
@@ -221,7 +221,6 @@
         updateStatus(`View Switched to: ${userRole === 'TEAM' ? 'Editor' : 'Viewer'}`);
     }
 
-    // NEW FUNCTION: Pin Filter Toggle
     function applyFilter() {
         currentFilter = document.getElementById('pinFilter').value;
         
@@ -267,7 +266,7 @@
     }
 
     function activatePinDrop(event) {
-        if (userRole !== 'TEAM') return; // Security Check
+        if (userRole !== 'TEAM') return; 
         
         if (event) event.stopPropagation(); 
         setTimeout(() => {
@@ -280,7 +279,7 @@
     let pendingNewPinData = null; 
 
     function createPinAt(latlng) {
-        if (userRole !== 'TEAM') return; // Security Check
+        if (userRole !== 'TEAM') return; 
 
         let tempMarker = L.marker(latlng).addTo(map);
         pendingNewPinData = { latlng: latlng, tempMarker: tempMarker };
@@ -378,7 +377,6 @@
                     marker.setIcon(icon2D);
                     updateMarkerPopup(marker);
                     
-                    // Respect the current filter - hide it if we are filtering out 2D!
                     if (currentFilter !== "ALL" && currentFilter !== "2D") {
                         map.removeLayer(marker);
                     }
@@ -405,7 +403,6 @@
         markers.push(m);
         updateMarkerPopup(m);
 
-        // Apply initial filter logic
         if (currentFilter === "ALL" || currentFilter === pin.state) {
             m.addTo(map);
         }
@@ -436,7 +433,6 @@
         let popupContent = `<div style="text-align:center; min-width: 140px;">
             <b style="font-size: 14px; display:block; margin-bottom:10px;">${header}</b>`;
 
-        // 1. ADD MEDIA VIEWERS (Available to everyone)
         if (state === "2D") {
             popupContent += `<button onclick="viewMedia(${id})" style="background:#2ecc71; color:white; border:none; padding:8px; border-radius:4px; cursor:pointer; width:100%; margin-bottom:6px; font-weight:bold;">👁️ View 2D Photo</button>`;
         } else if (state === "360") {
@@ -445,7 +441,6 @@
             popupContent += `<div style="color:#7f8c8d; font-size:12px; margin-bottom:6px; padding: 5px;">No photo attached yet.</div>`;
         }
 
-        // 2. ADD EDITOR ACTIONS (Only visible to Team)
         if (userRole === "TEAM") {
             popupContent += `
                 <button onclick="trigger360(${id})" style="background:#2c3e50; color:white; border:none; padding:8px; border-radius:4px; cursor:pointer; width:100%; margin-bottom:6px; font-weight:bold;">${state === "360" ? "🔄 Retake 360" : "🌐 Snap 360"}</button>
@@ -458,13 +453,28 @@
         marker.bindPopup(popupContent);
     }
 
+    // SLIDES THE RIGHT PANEL OPEN TO VIEW MEDIA
     window.viewMedia = function(id) {
         let m = markers.find(x => x.id === id);
         if(!m || !m.mediaData) return;
 
+        // Display the right panel as a flexbox item
+        document.getElementById('viewer-container').style.display = 'flex';
         document.getElementById('panorama').style.display = 'none';
+        
         document.getElementById('photo-viewer').style.display = 'block';
         document.getElementById('photo-viewer').src = m.mediaData;
+        
+        // Force the map to recalculate its dimensions so it doesn't stretch or break
+        setTimeout(() => map.invalidateSize(), 300);
+    };
+
+    // CLOSES THE PANEL AND RESTORES THE MAP TO FULL SCREEN
+    window.closeViewer = function() {
+        document.getElementById('viewer-container').style.display = 'none';
+        
+        // Force the map to fill the reclaimed space cleanly
+        setTimeout(() => map.invalidateSize(), 300);
     };
 
     window.deletePin = function(id) {
@@ -505,7 +515,6 @@
         marker.setIcon(icon360);
         updateMarkerPopup(marker);
         
-        // Hide if filtered out
         if (currentFilter !== "ALL" && currentFilter !== "360") {
             map.removeLayer(marker);
         }
