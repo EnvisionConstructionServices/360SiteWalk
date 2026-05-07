@@ -13,19 +13,27 @@
     <style>
         body, html { margin: 0; padding: 0; height: 100%; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; overflow: hidden; }
         #app-container { display: flex; flex-direction: column; height: 100vh; }
+        
+        /* NEW TOP BAR DESIGN */
+        .top-bar { display: flex; justify-content: space-between; align-items: center; background: #2c3e50; color: white; padding: 10px 15px; box-shadow: 0 2px 10px rgba(0,0,0,0.3); z-index: 1001; flex-wrap: wrap; gap: 10px; }
+        .top-bar-group { display: flex; align-items: center; gap: 10px; }
+        .top-bar label { font-size: 12px; font-weight: bold; color: #bdc3c7; text-transform: uppercase; letter-spacing: 1px; }
+        .top-bar select { padding: 8px 12px; font-size: 14px; border-radius: 6px; border: 1px solid #34495e; background: #ecf0f1; color: #2c3e50; font-weight: bold; cursor: pointer; outline: none; }
+        .top-bar select:focus { border-color: #3498db; }
+        
         #map { flex: 1; background: #e5e5e5; position: relative; border-bottom: 4px solid #2c3e50; }
         #viewer-container { flex: 1; background: #000; }
         #panorama { width: 100%; height: 100%; }
 
         /* UI Overlays */
-        .controls-top { position: absolute; top: 15px; right: 15px; z-index: 1000; display: flex; flex-direction: column; gap: 10px; }
-        .floor-selector { position: absolute; top: 15px; left: 50px; z-index: 1000; background: white; padding: 10px; border-radius: 8px; border: 2px solid #2c3e50; box-shadow: 0 4px 10px rgba(0,0,0,0.2); }
-        .btn { background: #2c3e50; color: white; padding: 12px 18px; border-radius: 6px; font-weight: bold; cursor: pointer; border: none; text-align: center; }
+        .btn { background: #34495e; color: white; padding: 10px 16px; border-radius: 6px; font-weight: bold; cursor: pointer; border: none; text-align: center; font-size: 13px; transition: background 0.2s; }
+        .btn:hover { background: #415b76; }
+        .btn-add { background: #27ae60; }
+        .btn-add:hover { background: #2ecc71; }
         .btn-secondary { background: #7f8c8d; }
         
         .status-bar { position: absolute; bottom: 10px; left: 10px; background: rgba(0,0,0,0.8); color: #2ecc71; padding: 6px 15px; border-radius: 20px; font-size: 13px; font-weight: bold; z-index: 1000; }
         
-        select { padding: 8px; font-size: 16px; border-radius: 4px; border: 1px solid #ccc; width: 150px; }
         #loading { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: white; z-index: 9999; display: flex; justify-content: center; align-items: center; font-size: 20px; font-weight: bold; }
         
         /* Removes Leaflet's default white square from custom icons */
@@ -64,17 +72,38 @@
 <div id="loading">Loading Project Data from Google Sheets...</div>
 
 <div id="app-container">
-    <div id="map">
-        <div class="floor-selector">
-            <label style="display:block; font-size: 11px; font-weight: bold; margin-bottom: 4px;">PROJECT FLOOR</label>
+    
+    <!-- NEW UNIFIED TOP NAVIGATION BAR -->
+    <div class="top-bar">
+        <!-- Left: Floor Selection -->
+        <div class="top-bar-group">
+            <label>Floor</label>
             <select id="floorSelect" onchange="changeFloor()"></select>
         </div>
-
-        <div class="controls-top">
-            <button class="btn" style="background: #27ae60; margin-bottom: 5px;" onclick="activatePinDrop(event)">📍 ADD PIN</button>
-            <button class="btn btn-secondary" onclick="syncPhotos()">BATCH SYNC (360)</button>
-        </div>
         
+        <!-- Center: Filters -->
+        <div class="top-bar-group">
+            <label>Filter</label>
+            <select id="pinFilter" onchange="applyFilter()">
+                <option value="ALL">📍 Show All</option>
+                <option value="EMPTY">🔴 Empty Pins Only</option>
+                <option value="2D">📸 2D Photos Only</option>
+                <option value="360">🌐 360 Photos Only</option>
+            </select>
+        </div>
+
+        <!-- Right: Role & Actions -->
+        <div class="top-bar-group">
+            <select id="roleSelect" onchange="changeRole()" style="background:#f39c12; color:white; border:none;">
+                <option value="TEAM">🛠️ Role: Team (Edit)</option>
+                <option value="SUB">👁️ Role: Sub (View)</option>
+            </select>
+            <button class="btn btn-add" id="addPinBtn" onclick="activatePinDrop(event)">📍 ADD PIN</button>
+            <button class="btn btn-secondary" id="syncBtn" onclick="syncPhotos()">BATCH SYNC</button>
+        </div>
+    </div>
+
+    <div id="map">
         <div id="status" class="status-bar">System Connected</div>
     </div>
 
@@ -87,15 +116,21 @@
 <script>
     const urlParams = new URLSearchParams(window.location.search);
     const SCRIPT_URL = urlParams.get('api'); 
+    const URL_ROLE = urlParams.get('role'); // NEW: Check the URL for a role assignment
     
     let floors = [];
-    let allPins = []; // NEW: Master memory list for all pins across all floors
+    let allPins = []; 
     let currentFloorIndex = 0;
     
     let planOverlay = null;
     let markers = [];
     let pendingPin = {}; 
     let isAddingPin = false; 
+    
+    // NEW STATE VARIABLES
+    // SECURITY UPDATE: Default to SUB unless the secret envisioncs tag is used
+    let userRole = (URL_ROLE && URL_ROLE.toLowerCase() === 'envisioncs') ? 'TEAM' : 'SUB'; 
+    let currentFilter = 'ALL'; // 'ALL', 'EMPTY', '2D', '360'
     
     // True SVG Map Pins with custom inner icons
     const createSvgPin = (innerPath, bgColor) => {
@@ -133,7 +168,7 @@
             .then(response => response.json())
             .then(data => { 
                 floors = data.floors; 
-                if (data.pins) allPins = data.pins; // Automatically loads pins if the backend provides them
+                if (data.pins) allPins = data.pins; 
                 initializeApp(); 
             })
             .catch(err => {
@@ -151,11 +186,57 @@
             opt.innerText = f.name;
             select.appendChild(opt);
         });
+
+        // NEW: Enforce Role Lock on Startup
+        document.getElementById('roleSelect').value = userRole;
+        if (userRole === 'SUB') {
+            document.getElementById('roleSelect').style.display = 'none'; // Hide the switcher so subs cannot change it
+        }
+        changeRole(); // Apply the UI visibility rules instantly
+
         loadFloor(0);
     }
 
+    // NEW FUNCTION: Role Management Toggle
+    function changeRole() {
+        userRole = document.getElementById('roleSelect').value;
+        
+        // Hide/Show actionable buttons based on role
+        document.getElementById('addPinBtn').style.display = (userRole === 'TEAM') ? 'block' : 'none';
+        document.getElementById('syncBtn').style.display = (userRole === 'TEAM') ? 'block' : 'none';
+        
+        // Disarm pin adding tool if switching roles
+        if (userRole === 'SUB') {
+            isAddingPin = false;
+            document.getElementById('map').style.cursor = '';
+        }
+
+        // Loop through active map markers to update their popups and dragging abilities
+        markers.forEach(m => {
+            if (userRole === 'TEAM') m.dragging.enable();
+            else m.dragging.disable();
+            updateMarkerPopup(m);
+        });
+        
+        updateStatus(`View Switched to: ${userRole === 'TEAM' ? 'Editor' : 'Viewer'}`);
+    }
+
+    // NEW FUNCTION: Pin Filter Toggle
+    function applyFilter() {
+        currentFilter = document.getElementById('pinFilter').value;
+        
+        markers.forEach(m => {
+            let matchesFilter = (currentFilter === "ALL" || m.pinState === currentFilter);
+            
+            if (matchesFilter && !map.hasLayer(m)) {
+                map.addLayer(m);
+            } else if (!matchesFilter && map.hasLayer(m)) {
+                map.removeLayer(m);
+            }
+        });
+    }
+
     function loadFloor(index) {
-        // 1. Remove old layers and active map markers
         if(planOverlay) map.removeLayer(planOverlay);
         markers.forEach(m => map.removeLayer(m));
         markers = [];
@@ -164,7 +245,6 @@
         
         updateStatus("Loading drawing...");
 
-        // 2. Create a temporary image to measure the actual dimensions
         let tempImg = new Image();
         tempImg.onload = function() {
             let imgHeight = this.height;
@@ -174,7 +254,6 @@
             planOverlay = L.imageOverlay(this.src, dynamicBounds).addTo(map);
             map.fitBounds(dynamicBounds);
             
-            // NEW: Render all pins from the master list that belong to this specific floor!
             allPins.filter(p => p.floor === currentFloorName).forEach(p => renderPin(p));
             
             updateStatus("Switched to " + currentFloorName);
@@ -188,6 +267,8 @@
     }
 
     function activatePinDrop(event) {
+        if (userRole !== 'TEAM') return; // Security Check
+        
         if (event) event.stopPropagation(); 
         setTimeout(() => {
             isAddingPin = true;
@@ -199,6 +280,8 @@
     let pendingNewPinData = null; 
 
     function createPinAt(latlng) {
+        if (userRole !== 'TEAM') return; // Security Check
+
         let tempMarker = L.marker(latlng).addTo(map);
         pendingNewPinData = { latlng: latlng, tempMarker: tempMarker };
         
@@ -228,17 +311,15 @@
         let id = Date.now();
         let floorName = floors[currentFloorIndex].name;
 
-        // Save local pin to master memory
         let newPin = { id: id, name: name, floor: floorName, lat: latlng.lat, lng: latlng.lng, state: "EMPTY", mediaData: null };
         allPins.push(newPin);
 
-        // Save to Sheets
         fetch(SCRIPT_URL, {
             method: 'POST', mode: 'no-cors',
             body: JSON.stringify({ action: "create", id: id, name: name, floor: floorName, x: latlng.lng, y: latlng.lat })
         }).then(() => updateStatus("Planned Pin: " + name));
 
-        renderPin(newPin); // Draw it
+        renderPin(newPin); 
     }
 
     function handlePinModalKeyPress(e) {
@@ -254,6 +335,7 @@
     });
 
     map.on('dblclick', function(e) {
+        if (userRole !== 'TEAM') return;
         isAddingPin = false; 
         document.getElementById('map').style.cursor = '';
         createPinAt(e.latlng);
@@ -283,20 +365,24 @@
                 updateStatus("2D Photo Saved & Attached!");
                 document.getElementById('cameraInput').value = ""; 
                 
-                // Update Master Memory
                 let pinData = allPins.find(p => p.id === pendingPin.id);
                 if (pinData) {
                     pinData.state = "2D";
                     pinData.mediaData = base64Image;
                 }
 
-                // Update the visual marker on the map
                 let marker = markers.find(m => m.id === pendingPin.id);
                 if(marker) {
                     marker.pinState = "2D";
                     marker.mediaData = base64Image;
                     marker.setIcon(icon2D);
                     updateMarkerPopup(marker);
+                    
+                    // Respect the current filter - hide it if we are filtering out 2D!
+                    if (currentFilter !== "ALL" && currentFilter !== "2D") {
+                        map.removeLayer(marker);
+                    }
+                    
                     viewMedia(pendingPin.id);
                 }
             });
@@ -304,14 +390,13 @@
         reader.readAsDataURL(file);
     }
 
-    // NEW FUNCTION: Renders a single pin from a data object
     function renderPin(pin) {
         let latlng = [pin.lat, pin.lng];
         let icon = emptyIcon;
         if (pin.state === "2D") icon = icon2D;
         if (pin.state === "360") icon = icon360;
 
-        let m = L.marker(latlng, { draggable: true, icon: icon }).addTo(map);
+        let m = L.marker(latlng, { draggable: (userRole === 'TEAM'), icon: icon });
         m.id = pin.id; 
         m.pinName = pin.name; 
         m.pinState = pin.state; 
@@ -320,10 +405,15 @@
         markers.push(m);
         updateMarkerPopup(m);
 
+        // Apply initial filter logic
+        if (currentFilter === "ALL" || currentFilter === pin.state) {
+            m.addTo(map);
+        }
+
         m.on('dragend', function() {
+            if (userRole !== 'TEAM') return;
             let pos = m.getLatLng();
             
-            // Update Master Memory
             let p = allPins.find(x => x.id === pin.id);
             if (p) { p.lat = pos.lat; p.lng = pos.lng; }
 
@@ -343,22 +433,28 @@
         if (state === "2D") header = `📷 ${marker.pinName} (2D)`;
         if (state === "360") header = `🌐 ${marker.pinName} (360)`;
 
-        let viewBtn = '';
+        let popupContent = `<div style="text-align:center; min-width: 140px;">
+            <b style="font-size: 14px; display:block; margin-bottom:10px;">${header}</b>`;
+
+        // 1. ADD MEDIA VIEWERS (Available to everyone)
         if (state === "2D") {
-            viewBtn = `<button onclick="viewMedia(${id})" style="background:#2ecc71; color:white; border:none; padding:8px; border-radius:4px; cursor:pointer; width:100%; margin-bottom:6px; font-weight:bold;">👁️ View 2D Photo</button>`;
+            popupContent += `<button onclick="viewMedia(${id})" style="background:#2ecc71; color:white; border:none; padding:8px; border-radius:4px; cursor:pointer; width:100%; margin-bottom:6px; font-weight:bold;">👁️ View 2D Photo</button>`;
         } else if (state === "360") {
-            viewBtn = `<div style="background:#f39c12; color:white; padding:6px; border-radius:4px; font-size:11px; margin-bottom:6px;">360 Photo Pending Sync</div>`;
+            popupContent += `<div style="background:#f39c12; color:white; padding:6px; border-radius:4px; font-size:11px; margin-bottom:6px;">360 Photo Pending Sync</div>`;
+        } else if (userRole === "SUB") {
+            popupContent += `<div style="color:#7f8c8d; font-size:12px; margin-bottom:6px; padding: 5px;">No photo attached yet.</div>`;
         }
 
-        let popupContent = `
-            <div style="text-align:center; min-width: 140px;">
-                <b style="font-size: 14px; display:block; margin-bottom:10px;">${header}</b>
-                ${viewBtn}
+        // 2. ADD EDITOR ACTIONS (Only visible to Team)
+        if (userRole === "TEAM") {
+            popupContent += `
                 <button onclick="trigger360(${id})" style="background:#2c3e50; color:white; border:none; padding:8px; border-radius:4px; cursor:pointer; width:100%; margin-bottom:6px; font-weight:bold;">${state === "360" ? "🔄 Retake 360" : "🌐 Snap 360"}</button>
                 <button onclick="trigger2D(${id})" style="background:#8e44ad; color:white; border:none; padding:8px; border-radius:4px; cursor:pointer; width:100%; margin-bottom:6px; font-weight:bold;">${state === "2D" ? "🔄 Retake 2D" : "📸 Take 2D"}</button>
                 <button onclick="deletePin(${id})" style="background:#e74c3c; color:white; border:none; padding:8px; border-radius:4px; cursor:pointer; width:100%; font-weight:bold;">🗑️ Delete</button>
-            </div>
-        `;
+            `;
+        }
+
+        popupContent += `</div>`;
         marker.bindPopup(popupContent);
     }
 
@@ -372,12 +468,11 @@
     };
 
     window.deletePin = function(id) {
+        if (userRole !== 'TEAM') return;
         if (!confirm("Are you sure you want to delete this pin?")) return;
         
-        // Remove from Master Memory
         allPins = allPins.filter(p => p.id !== id);
         
-        // Remove from map visually
         let markerIndex = markers.findIndex(m => m.id === id);
         if (markerIndex > -1) {
             map.removeLayer(markers[markerIndex]);
@@ -393,6 +488,7 @@
     };
 
     window.trigger360 = function(id) {
+        if (userRole !== 'TEAM') return;
         let marker = markers.find(m => m.id === id);
         if(!marker) return;
         
@@ -402,19 +498,23 @@
             body: JSON.stringify({ name: "camera.takePicture" })
         });
         
-        // Update Master Memory
         let pinData = allPins.find(p => p.id === id);
         if (pinData) pinData.state = "360";
 
-        // Update Visual Marker
         marker.pinState = "360";
         marker.setIcon(icon360);
         updateMarkerPopup(marker);
+        
+        // Hide if filtered out
+        if (currentFilter !== "ALL" && currentFilter !== "360") {
+            map.removeLayer(marker);
+        }
         
         marker.closePopup();
     };
 
     window.trigger2D = function(id) {
+        if (userRole !== 'TEAM') return;
         let marker = markers.find(m => m.id === id);
         if(!marker) return;
         
@@ -429,6 +529,7 @@
     }
 
     function syncPhotos() {
+        if (userRole !== 'TEAM') return;
         alert("Ensure iPad Hotspot is ON and 360 Camera is connected to it.\nBatch sync will start now.");
     }
 </script>
