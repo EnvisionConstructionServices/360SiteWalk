@@ -28,21 +28,22 @@
         /* NEW RIGHT-HAND VIEWER PANEL */
         #viewer-container { display: none; width: 40%; min-width: 350px; background: #000; position: relative; border-left: 4px solid #2c3e50; flex-direction: column; }
         #panorama { width: 100%; height: 100%; display: none; }
-        .close-viewer-btn { position: absolute; top: 15px; left: 15px; background: rgba(0,0,0,0.6); color: white; border: 2px solid white; border-radius: 50%; width: 35px; height: 35px; font-weight: bold; cursor: pointer; z-index: 1000; font-size: 16px; display: flex; justify-content: center; align-items: center; transition: background 0.2s; }
+        .close-viewer-btn { position: absolute; top: 15px; left: 15px; background: rgba(0,0,0,0.6); color: white; border: 2px solid white; border-radius: 50%; width: 35px; height: 35px; cursor: pointer; z-index: 1000; display: flex; justify-content: center; align-items: center; transition: background 0.2s; padding: 0; }
         .close-viewer-btn:hover { background: #e74c3c; border-color: #e74c3c; }
 
         /* UI Overlays */
-        .btn { background: #34495e; color: white; padding: 10px 16px; border-radius: 6px; font-weight: bold; cursor: pointer; border: none; text-align: center; font-size: 13px; transition: background 0.2s; }
+        .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; background: #34495e; color: white; padding: 10px 16px; border-radius: 6px; font-weight: bold; cursor: pointer; border: none; font-size: 13px; transition: background 0.2s; }
         .btn:hover { background: #415b76; }
         .btn-add { background: #27ae60; }
         .btn-add:hover { background: #2ecc71; }
         .btn-secondary { background: #7f8c8d; }
         
-        .status-bar { position: absolute; bottom: 10px; left: 10px; background: rgba(0,0,0,0.8); color: #2ecc71; padding: 6px 15px; border-radius: 20px; font-size: 13px; font-weight: bold; z-index: 1000; }
-        
         #loading { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: white; z-index: 9999; display: flex; justify-content: center; align-items: center; font-size: 20px; font-weight: bold; }
         
         .custom-svg-pin { background: transparent; border: none; }
+        
+        /* Responsive Pin Scaler */
+        .pin-scaler { transform: scale(var(--pin-scale, 1)); transform-origin: bottom center; transition: transform 0.15s ease-out; width: 100%; height: 100%; }
         
         /* Custom Modal Styling */
         .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); z-index: 9999; justify-content: center; align-items: center; backdrop-filter: blur(2px); }
@@ -95,14 +96,20 @@
         <div class="top-bar-group">
             <label>Filter</label>
             <select id="pinFilter" onchange="applyFilter()">
-                <option value="ALL">📍 Show All</option>
-                <option value="EMPTY">🔴 Empty Pins Only</option>
-                <option value="2D">📸 2D Photos Only</option>
-                <option value="360">🌐 360 Photos Only</option>
+                <option value="ALL">Show All Pins</option>
+                <option value="EMPTY">Empty Pins Only</option>
+                <option value="2D">2D Photos Only</option>
+                <option value="360">360 Photos Only</option>
             </select>
             
-            <button class="btn btn-add" id="addPinBtn" onclick="activatePinDrop(event)">📍 ADD PIN</button>
-            <button class="btn btn-secondary" id="syncBtn" onclick="syncPhotos()">BATCH SYNC</button>
+            <button class="btn btn-add" id="addPinBtn" onclick="activatePinDrop(event)">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
+                Add Pin
+            </button>
+            <button class="btn btn-secondary" id="syncBtn" onclick="syncPhotos()">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"></path><path d="M12 12v9"></path><path d="M8 17l4-4 4 4"></path></svg>
+                Batch Sync
+            </button>
 
             <!-- Separator Line -->
             <div style="width: 1px; height: 30px; background: #7f8c8d; margin: 0 5px;"></div>
@@ -116,12 +123,13 @@
     <div id="main-content">
         <!-- Map Container -->
         <div id="map">
-            <div id="status" class="status-bar">System Connected</div>
         </div>
 
         <!-- Side Panel Viewer -->
         <div id="viewer-container">
-            <button class="close-viewer-btn" onclick="deselectPin()" title="Close Viewer">✕</button>
+            <button class="close-viewer-btn" onclick="deselectPin()" title="Close Viewer">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            </button>
             <div id="panorama"></div>
             <img id="photo-viewer" style="display:none; width:100%; height:100%; object-fit:contain; background:#111;" />
         </div>
@@ -144,15 +152,27 @@
     
     let userRole = (URL_ROLE && URL_ROLE.toLowerCase() === 'envisioncs') ? 'TEAM' : 'SUB'; 
     let currentFilter = 'ALL'; 
+
+    // MODERN SVG UI ICONS DICTIONARY
+    const uiIcons = {
+        mapPin: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>`,
+        camera: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>`,
+        globe: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>`,
+        refresh: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg>`,
+        trash: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>`,
+        x: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`
+    };
     
     const createSvgPin = (innerPath, bgColor) => {
         const svgString = `
-            <svg width="36" height="48" viewBox="0 0 24 32" xmlns="http://www.w3.org/2000/svg">
-                <path d="M12 0C5.373 0 0 5.373 0 12c0 8.5 12 20 12 20s12-11.5 12-20C24 5.373 18.627 0 12 0z" fill="${bgColor}" stroke="#ffffff" stroke-width="1.5"/>
-                <g transform="translate(3, 3) scale(0.75)">
-                    ${innerPath}
-                </g>
-            </svg>
+            <div class="pin-scaler">
+                <svg width="36" height="48" viewBox="0 0 24 32" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 0C5.373 0 0 5.373 0 12c0 8.5 12 20 12 20s12-11.5 12-20C24 5.373 18.627 0 12 0z" fill="${bgColor}" stroke="#ffffff" stroke-width="1.5"/>
+                    <g transform="translate(3, 3) scale(0.75)">
+                        ${innerPath}
+                    </g>
+                </svg>
+            </div>
         `;
         return L.divIcon({
             className: 'custom-svg-pin',
@@ -163,15 +183,24 @@
         });
     };
 
+    // MODERN MAP PIN SVG PATHS (Outlined/Stroked for a sleeker look)
     const pathEmpty = `<circle cx="12" cy="12" r="4" fill="#ffffff" />`;
-    const path2D = `<path d="M20 6h-3.17L15 4H9L7.17 6H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm-8 11c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.65 0-3 1.35-3 3s1.35 3 3 3 3-1.35 3-3-1.35-3-3-3z" fill="#ffffff"/>`;
-    const path360 = `<path d="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M12,4.04C14.43,4.04 16.5,5.65 17.5,7.7H14.86C14.4,6.29 13.33,5.08 12,4.04M9.14,7.7H6.5C7.5,5.65 9.57,4.04 12,4.04C10.67,5.08 9.6,6.29 9.14,7.7M12,19.96C13.33,18.92 14.4,17.71 14.86,16.3H17.5C16.5,18.35 14.43,19.96 12,19.96M6.5,16.3H9.14C9.6,17.71 10.67,18.92 12,19.96C9.57,19.96 7.5,18.35 6.5,16.3M4.26,14C4.09,13.36 4,12.69 4,12C4,11.31 4.09,10.64 4.26,10H8.38C8.28,10.64 8.2,11.31 8.2,12C8.2,12.69 8.28,13.36 8.38,14H4.26M19.74,14H15.62C15.72,13.36 15.8,12.69 15.8,12C15.8,11.31 15.72,10.64 15.62,10H19.74C19.91,10.64 20,11.31 20,12C20,12.69 19.91,13.36 19.74,14M9.54,14H14.46C14.56,13.36 14.65,12.69 14.65,12C14.65,11.31 14.56,10.64 14.46,10H9.54C9.44,10.64 9.35,11.31 9.35,12C9.35,12.69 9.44,13.36 9.54,14Z" fill="#ffffff"/>`;
+    const path2D = `<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" stroke="#ffffff" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="13" r="4" stroke="#ffffff" stroke-width="2" fill="none"/>`;
+    const path360 = `<circle cx="12" cy="12" r="9" stroke="#ffffff" stroke-width="2" fill="none"/><path d="M12 3a15.3 15.3 0 0 1 4 9 15.3 15.3 0 0 1-4 9 15.3 15.3 0 0 1-4-9 15.3 15.3 0 0 1 4-9z" stroke="#ffffff" stroke-width="2" fill="none"/><path d="M3 12h18" stroke="#ffffff" stroke-width="2" fill="none"/>`;
 
     const emptyIcon = createSvgPin(pathEmpty, '#e74c3c'); 
     const icon2D = createSvgPin(path2D, '#8e44ad');       
     const icon360 = createSvgPin(path360, '#2980b9');     
 
     var map = L.map('map', { crs: L.CRS.Simple, minZoom: -2, doubleClickZoom: false });
+
+    // Dynamically scale pins based on zoom level
+    function updatePinScale() {
+        let z = map.getZoom();
+        let scale = Math.max(0.4, Math.min(1.5, 1 + ((z + 1) * 0.25)));
+        document.getElementById('map').style.setProperty('--pin-scale', scale);
+    }
+    map.on('zoom', updatePinScale);
 
     if (!SCRIPT_URL) {
         document.getElementById('loading').innerText = "Error: Missing ?api= in URL";
@@ -200,8 +229,8 @@
         });
 
         // Apply UI permissions based on the silent URL role
-        document.getElementById('addPinBtn').style.display = (userRole === 'TEAM') ? 'block' : 'none';
-        document.getElementById('syncBtn').style.display = (userRole === 'TEAM') ? 'block' : 'none';
+        document.getElementById('addPinBtn').style.display = (userRole === 'TEAM') ? 'inline-flex' : 'none';
+        document.getElementById('syncBtn').style.display = (userRole === 'TEAM') ? 'inline-flex' : 'none';
 
         loadFloor(0);
     }
@@ -237,6 +266,7 @@
 
             planOverlay = L.imageOverlay(this.src, dynamicBounds).addTo(map);
             map.fitBounds(dynamicBounds);
+            updatePinScale(); 
             
             allPins.filter(p => p.floor === currentFloorName).forEach(p => renderPin(p));
             
@@ -316,7 +346,6 @@
             document.getElementById('map').style.cursor = ''; 
             createPinAt(e.latlng);
         } else {
-            // Clicking empty map space deselects the current pin
             deselectPin();
         }
     });
@@ -368,7 +397,6 @@
                         map.removeLayer(marker);
                     }
                     
-                    // Refresh the top bar with new state
                     selectPin(pendingPin.id);
                 }
             });
@@ -408,7 +436,6 @@
             updateStatus("Position Updated");
         });
 
-        // Trigger the top bar menu when a pin is selected
         m.on('click', function() {
             selectPin(m.id);
         });
@@ -419,27 +446,29 @@
         if(!marker) return;
 
         let state = marker.pinState;
-        let header = `📍 ${marker.pinName}`;
-        if (state === "2D") header = `📷 ${marker.pinName} (2D)`;
-        if (state === "360") header = `🌐 ${marker.pinName} (360)`;
+        
+        // Dynamically apply modern icon to the header
+        let header = `<span style="display:inline-flex; align-items:center; gap:6px;">${uiIcons.mapPin} ${marker.pinName}</span>`;
+        if (state === "2D") header = `<span style="display:inline-flex; align-items:center; gap:6px;">${uiIcons.camera} ${marker.pinName}</span>`;
+        if (state === "360") header = `<span style="display:inline-flex; align-items:center; gap:6px;">${uiIcons.globe} ${marker.pinName}</span>`;
 
-        let actionsHtml = `<span style="font-weight:bold; margin-right: 15px; font-size: 14px; color: #ecf0f1;">${header}</span>`;
+        let actionsHtml = `<span style="display:flex; align-items:center; margin-right: 15px; font-size: 14px; font-weight: bold; color: #ecf0f1;">${header}</span>`;
 
         if (state === "360" && !marker.mediaData) {
-            actionsHtml += `<span style="color:#f39c12; font-size: 12px; margin-right:15px; font-weight:bold;">Pending Sync</span>`;
+            actionsHtml += `<span style="display:inline-flex; align-items:center; gap:4px; color:#f39c12; font-size: 12px; margin-right:15px; font-weight:bold;">Pending Sync</span>`;
         } else if (userRole === "SUB" && state === "EMPTY") {
             actionsHtml += `<span style="color:#bdc3c7; font-size: 12px; margin-right:15px;">No photo attached</span>`;
         }
 
         // Editor tools
         if (userRole === "TEAM") {
-            actionsHtml += `<button class="btn" style="background:#2980b9; margin-right:8px; padding: 6px 12px; font-size:12px;" onclick="trigger360(${id})">${state === "360" ? "🔄 Retake 360" : "🌐 Snap 360"}</button>`;
-            actionsHtml += `<button class="btn" style="background:#8e44ad; margin-right:8px; padding: 6px 12px; font-size:12px;" onclick="trigger2D(${id})">${state === "2D" ? "🔄 Retake 2D" : "📸 Take 2D"}</button>`;
-            actionsHtml += `<button class="btn" style="background:#e74c3c; margin-right:15px; padding: 6px 12px; font-size:12px;" onclick="deletePin(${id})">🗑️ Delete</button>`;
+            actionsHtml += `<button class="btn" style="background:#2980b9; margin-right:8px; padding: 6px 12px; font-size:12px;" onclick="trigger360(${id})">${state === "360" ? uiIcons.refresh + " Retake 360" : uiIcons.globe + " Snap 360"}</button>`;
+            actionsHtml += `<button class="btn" style="background:#8e44ad; margin-right:8px; padding: 6px 12px; font-size:12px;" onclick="trigger2D(${id})">${state === "2D" ? uiIcons.refresh + " Retake 2D" : uiIcons.camera + " Take 2D"}</button>`;
+            actionsHtml += `<button class="btn" style="background:#e74c3c; margin-right:15px; padding: 6px 12px; font-size:12px;" onclick="deletePin(${id})">${uiIcons.trash} Delete</button>`;
         }
 
         // Close Selection button
-        actionsHtml += `<button class="btn" style="background:transparent; border:2px solid #7f8c8d; padding: 4px 10px; color:#bdc3c7; border-radius: 50%; display:flex; align-items:center; justify-content:center;" onclick="deselectPin()" title="Deselect Pin">✕</button>`;
+        actionsHtml += `<button class="btn" style="background:transparent; border:2px solid #7f8c8d; padding: 0; color:#bdc3c7; border-radius: 50%; display:flex; align-items:center; justify-content:center; width: 28px; height: 28px;" onclick="deselectPin()" title="Deselect Pin">${uiIcons.x}</button>`;
 
         document.getElementById('pin-actions-bar').innerHTML = actionsHtml;
         document.getElementById('pin-actions-bar').style.display = 'flex';
@@ -462,10 +491,8 @@
         let m = markers.find(x => x.id === id);
         if(!m) return;
         
-        // Prevent opening if it's empty
         if (!m.mediaData && m.pinState !== '360') return;
 
-        // Display the right panel as a flexbox item
         document.getElementById('viewer-container').style.display = 'flex';
         
         if (m.pinState === '360') {
@@ -473,8 +500,17 @@
             document.getElementById('panorama').style.display = 'block';
             
             if (!m.mediaData) {
-                // Placeholder for 360 until media is synced
-                document.getElementById('panorama').innerHTML = '<div style="color:#f39c12; display:flex; justify-content:center; align-items:center; height:100%; text-align:center; padding:20px; font-weight:bold; font-family:sans-serif; flex-direction:column; font-size:16px;">🌐<br><br>360 Photo Pending Sync<br><br><span style="font-size:12px;color:#bdc3c7;">(Media will appear here once batch uploaded)</span></div>';
+                // Sleek placeholder for 360 until media is synced
+                document.getElementById('panorama').innerHTML = `
+                    <div style="color:#f39c12; display:flex; justify-content:center; align-items:center; height:100%; text-align:center; padding:20px; font-weight:bold; font-family:sans-serif; flex-direction:column; font-size:16px;">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom: 15px;">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <line x1="2" y1="12" x2="22" y2="12"></line>
+                            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+                        </svg>
+                        360 Photo Pending Sync<br><br>
+                        <span style="font-size:12px;color:#bdc3c7;">(Media will appear here once batch uploaded)</span>
+                    </div>`;
             }
         } else if (m.pinState === '2D') {
             document.getElementById('panorama').style.display = 'none';
@@ -482,15 +518,12 @@
             document.getElementById('photo-viewer').src = m.mediaData;
         }
         
-        // Force the map to recalculate its dimensions so it doesn't stretch or break
         setTimeout(() => map.invalidateSize(), 300);
     };
 
     // CLOSES THE PANEL AND RESTORES THE MAP TO FULL SCREEN
     window.closeViewer = function() {
         document.getElementById('viewer-container').style.display = 'none';
-        
-        // Force the map to fill the reclaimed space cleanly
         setTimeout(() => map.invalidateSize(), 300);
     };
 
@@ -512,7 +545,7 @@
         });
         
         updateStatus("Pin Deleted");
-        deselectPin(); // Clear the top bar after deleting
+        deselectPin(); 
     };
 
     window.trigger360 = function(id) {
@@ -536,7 +569,7 @@
             map.removeLayer(marker);
             deselectPin();
         } else {
-            selectPin(id); // Refresh the top bar UI to show 'Pending Sync'
+            selectPin(id); 
         }
     };
 
@@ -550,8 +583,7 @@
     };
 
     function updateStatus(msg) {
-        document.getElementById('status').innerText = msg;
-        setTimeout(() => document.getElementById('status').innerText = "System Ready", 5000);
+        console.log("System Status:", msg);
     }
 
     function syncPhotos() {
