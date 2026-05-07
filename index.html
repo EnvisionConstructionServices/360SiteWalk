@@ -27,6 +27,9 @@
         
         select { padding: 8px; font-size: 16px; border-radius: 4px; border: 1px solid #ccc; width: 150px; }
         #loading { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: white; z-index: 9999; display: flex; justify-content: center; align-items: center; font-size: 20px; font-weight: bold; }
+        
+        /* Removes Leaflet's default white square from custom icons */
+        .custom-svg-pin { background: transparent; border: none; }
     </style>
 </head>
 <body>
@@ -68,6 +71,34 @@
     let pendingPin = {}; // Stores location while 2D photo is taken
     let isAddingPin = false; // Tracks if the user clicked the Add Pin button
     
+    // NEW: True SVG Map Pins with custom inner icons
+    const createSvgPin = (innerPath, bgColor) => {
+        const svgString = `
+            <svg width="36" height="48" viewBox="0 0 24 32" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 0C5.373 0 0 5.373 0 12c0 8.5 12 20 12 20s12-11.5 12-20C24 5.373 18.627 0 12 0z" fill="${bgColor}" stroke="#ffffff" stroke-width="1.5"/>
+                <g transform="translate(3, 3) scale(0.75)">
+                    ${innerPath}
+                </g>
+            </svg>
+        `;
+        return L.divIcon({
+            className: 'custom-svg-pin',
+            html: svgString,
+            iconSize: [36, 48],
+            iconAnchor: [18, 48],  // Sharp point of the teardrop hits the exact coordinate
+            popupAnchor: [0, -48]  // Popup opens right above the pin
+        });
+    };
+
+    // Clean, scalable SVG paths for the inner icons
+    const pathEmpty = `<circle cx="12" cy="12" r="4" fill="#ffffff" />`;
+    const path2D = `<path d="M20 6h-3.17L15 4H9L7.17 6H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm-8 11c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.65 0-3 1.35-3 3s1.35 3 3 3 3-1.35 3-3-1.35-3-3-3z" fill="#ffffff"/>`;
+    const path360 = `<path d="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M12,4.04C14.43,4.04 16.5,5.65 17.5,7.7H14.86C14.4,6.29 13.33,5.08 12,4.04M9.14,7.7H6.5C7.5,5.65 9.57,4.04 12,4.04C10.67,5.08 9.6,6.29 9.14,7.7M12,19.96C13.33,18.92 14.4,17.71 14.86,16.3H17.5C16.5,18.35 14.43,19.96 12,19.96M6.5,16.3H9.14C9.6,17.71 10.67,18.92 12,19.96C9.57,19.96 7.5,18.35 6.5,16.3M4.26,14C4.09,13.36 4,12.69 4,12C4,11.31 4.09,10.64 4.26,10H8.38C8.28,10.64 8.2,11.31 8.2,12C8.2,12.69 8.28,13.36 8.38,14H4.26M19.74,14H15.62C15.72,13.36 15.8,12.69 15.8,12C15.8,11.31 15.72,10.64 15.62,10H19.74C19.91,10.64 20,11.31 20,12C20,12.69 19.91,13.36 19.74,14M9.54,14H14.46C14.56,13.36 14.65,12.69 14.65,12C14.65,11.31 14.56,10.64 14.46,10H9.54C9.44,10.64 9.35,11.31 9.35,12C9.35,12.69 9.44,13.36 9.54,14Z" fill="#ffffff"/>`;
+
+    const emptyIcon = createSvgPin(pathEmpty, '#e74c3c'); // Red
+    const icon2D = createSvgPin(path2D, '#8e44ad');       // Purple
+    const icon360 = createSvgPin(path360, '#2980b9');     // Blue
+
     // Disabled doubleClickZoom so it doesn't conflict with double-tap pinning
     var map = L.map('map', { crs: L.CRS.Simple, minZoom: -2, doubleClickZoom: false });
 
@@ -219,26 +250,31 @@
             }).then(() => {
                 updateStatus("2D Photo Saved & Attached!");
                 document.getElementById('cameraInput').value = ""; // Reset input
+                
+                // NEW: Visually update the pin and show the photo immediately
+                let marker = markers.find(m => m.id === pendingPin.id);
+                if(marker) {
+                    marker.pinState = "2D";
+                    marker.mediaData = base64Image;
+                    marker.setIcon(icon2D);
+                    updateMarkerPopup(marker);
+                    viewMedia(pendingPin.id); // Show it in the bottom pane!
+                }
             });
         };
         reader.readAsDataURL(file);
     }
 
     function addMarker(id, latlng, name, type) {
-        let m = L.marker(latlng, { draggable: true }).addTo(map);
-        m.id = id; // Store ID
-        m.pinName = name; // Store Name for camera references
+        // Create marker with the RED empty icon by default
+        let m = L.marker(latlng, { draggable: true, icon: emptyIcon }).addTo(map);
+        m.id = id; 
+        m.pinName = name; 
+        m.pinState = "EMPTY"; // Can be "EMPTY", "2D", or "360"
+        m.mediaData = null; // Holds the image to display
         
-        let popupContent = `
-            <div style="text-align:center; min-width: 130px;">
-                <b style="font-size: 14px; display:block; margin-bottom:10px;">📍 ${name}</b>
-                <button onclick="trigger360(${id})" style="background:#2c3e50; color:white; border:none; padding:8px; border-radius:4px; cursor:pointer; width:100%; margin-bottom:6px; font-weight:bold;">🌐 Snap 360</button>
-                <button onclick="trigger2D(${id})" style="background:#8e44ad; color:white; border:none; padding:8px; border-radius:4px; cursor:pointer; width:100%; margin-bottom:6px; font-weight:bold;">📸 Take 2D</button>
-                <button onclick="deletePin(${id})" style="background:#e74c3c; color:white; border:none; padding:8px; border-radius:4px; cursor:pointer; width:100%; font-weight:bold;">🗑️ Delete</button>
-            </div>
-        `;
-        m.bindPopup(popupContent);
         markers.push(m);
+        updateMarkerPopup(m); // Generate the popup buttons dynamically
 
         m.on('dragend', function() {
             let pos = m.getLatLng();
@@ -249,6 +285,47 @@
             updateStatus("Position Updated");
         });
     }
+
+    // NEW FUNCTION: Dynamically generates popup based on what is attached
+    function updateMarkerPopup(marker) {
+        let state = marker.pinState;
+        let id = marker.id;
+
+        // Change the header based on state
+        let header = `📍 ${marker.pinName}`;
+        if (state === "2D") header = `📷 ${marker.pinName} (2D)`;
+        if (state === "360") header = `🌐 ${marker.pinName} (360)`;
+
+        // Add a "View" button or a "Pending Sync" tag
+        let viewBtn = '';
+        if (state === "2D") {
+            viewBtn = `<button onclick="viewMedia(${id})" style="background:#2ecc71; color:white; border:none; padding:8px; border-radius:4px; cursor:pointer; width:100%; margin-bottom:6px; font-weight:bold;">👁️ View 2D Photo</button>`;
+        } else if (state === "360") {
+            viewBtn = `<div style="background:#f39c12; color:white; padding:6px; border-radius:4px; font-size:11px; margin-bottom:6px;">360 Photo Pending Sync</div>`;
+        }
+
+        let popupContent = `
+            <div style="text-align:center; min-width: 140px;">
+                <b style="font-size: 14px; display:block; margin-bottom:10px;">${header}</b>
+                ${viewBtn}
+                <button onclick="trigger360(${id})" style="background:#2c3e50; color:white; border:none; padding:8px; border-radius:4px; cursor:pointer; width:100%; margin-bottom:6px; font-weight:bold;">${state === "360" ? "🔄 Retake 360" : "🌐 Snap 360"}</button>
+                <button onclick="trigger2D(${id})" style="background:#8e44ad; color:white; border:none; padding:8px; border-radius:4px; cursor:pointer; width:100%; margin-bottom:6px; font-weight:bold;">${state === "2D" ? "🔄 Retake 2D" : "📸 Take 2D"}</button>
+                <button onclick="deletePin(${id})" style="background:#e74c3c; color:white; border:none; padding:8px; border-radius:4px; cursor:pointer; width:100%; font-weight:bold;">🗑️ Delete</button>
+            </div>
+        `;
+        marker.bindPopup(popupContent);
+    }
+
+    // NEW FUNCTION: Opens the photo in the bottom screen
+    window.viewMedia = function(id) {
+        let m = markers.find(x => x.id === id);
+        if(!m || !m.mediaData) return;
+
+        // Hide 360 panorama container, show standard image viewer
+        document.getElementById('panorama').style.display = 'none';
+        document.getElementById('photo-viewer').style.display = 'block';
+        document.getElementById('photo-viewer').src = m.mediaData;
+    };
 
     // NEW FUNCTION: DELETE PIN
     window.deletePin = function(id) {
@@ -279,6 +356,12 @@
             method: 'POST', mode: 'no-cors',
             body: JSON.stringify({ name: "camera.takePicture" })
         });
+        
+        // Visually upgrade the pin to a blue 360 pin
+        marker.pinState = "360";
+        marker.setIcon(icon360);
+        updateMarkerPopup(marker);
+        
         marker.closePopup();
     };
 
