@@ -44,8 +44,7 @@
         </div>
 
         <div class="controls-top">
-            <button class="btn" style="background: #27ae60; margin-bottom: 5px;" onclick="activatePinDrop()">📍 ADD PIN</button>
-            <button class="btn" id="modeBtn" onclick="toggleMode()">MODE: 360 CAPTURE</button>
+            <button class="btn" style="background: #27ae60; margin-bottom: 5px;" onclick="activatePinDrop(event)">📍 ADD PIN</button>
             <button class="btn btn-secondary" onclick="syncPhotos()">BATCH SYNC (360)</button>
         </div>
         
@@ -63,9 +62,6 @@
     
     let floors = [];
     let currentFloorIndex = 0;
-    
-    // Modes: "360", "2D", "VIEW"
-    let currentMode = "360"; 
     
     let planOverlay = null;
     let markers = [];
@@ -141,24 +137,23 @@
         loadFloor(document.getElementById('floorSelect').value);
     }
 
-    function activatePinDrop() {
-        if (currentMode === "VIEW") {
-            alert("Switch to 360 or 2D mode to add pins.");
-            return;
-        }
-        isAddingPin = true;
-        document.getElementById('map').style.cursor = 'crosshair';
-        updateStatus("Tap the map to drop a pin...");
+    function activatePinDrop(event) {
+        // Stop the click from falling through the button onto the map
+        if (event) event.stopPropagation(); 
+        
+        // A tiny 50ms delay guarantees the map doesn't accidentally catch the tail-end of your button click
+        setTimeout(() => {
+            isAddingPin = true;
+            document.getElementById('map').style.cursor = 'crosshair';
+            updateStatus("Tap the map to drop a pin...");
+        }, 50);
     }
 
     function createPinAt(latlng) {
-        if (currentMode === "VIEW") return;
-
-        // Drop a temporary marker so the user sees exactly where they tapped
+        // Drop a temporary marker immediately so the user sees exactly where they tapped
         let tempMarker = L.marker(latlng).addTo(map);
 
-        // A tiny delay is required because JavaScript's 'prompt' freezes the screen
-        // and would prevent the temp pin from drawing if we didn't pause for 100ms.
+        // A 300ms delay guarantees the browser draws the pin BEFORE the prompt freezes the screen
         setTimeout(() => {
             let name = prompt("Name this pin for " + floors[currentFloorIndex].name + ":");
             
@@ -168,34 +163,19 @@
                 return;
             }
 
-            // Remove the temp pin, we will replace it with the fully active one
+            // Remove the temp pin, replace with permanent active pin
             map.removeLayer(tempMarker);
 
             let id = Date.now();
 
-            if (currentMode === "360") {
-                updateStatus("Triggering 360 Camera...");
-                
-                // 1. OSC Trigger to Ricoh/Insta360
-                fetch('http://192.168.1.1/osc/commands/execute', {
-                    method: 'POST', mode: 'no-cors',
-                    body: JSON.stringify({ name: "camera.takePicture" })
-                });
+            // Save the layout pin to Sheets
+            fetch(SCRIPT_URL, {
+                method: 'POST', mode: 'no-cors',
+                body: JSON.stringify({ action: "create", id: id, name: name, floor: floors[currentFloorIndex].name, x: latlng.lng, y: latlng.lat })
+            }).then(() => updateStatus("Planned Pin: " + name));
 
-                // 2. Save location to Sheets (Photo stays on camera for batch sync)
-                fetch(SCRIPT_URL, {
-                    method: 'POST', mode: 'no-cors',
-                    body: JSON.stringify({ action: "create", id: id, name: name, floor: floors[currentFloorIndex].name, x: latlng.lng, y: latlng.lat })
-                }).then(() => updateStatus("Pinned: " + name));
-
-                addMarker(id, latlng, name, "360");
-                
-            } else if (currentMode === "2D") {
-                // Save info temporarily and open device camera
-                pendingPin = { id: id, name: name, latlng: latlng };
-                document.getElementById('cameraInput').click();
-            }
-        }, 100);
+            addMarker(id, latlng, name, "PLANNED");
+        }, 300);
     }
 
     // MAIN TAP INTERACTION (Armed via button)
@@ -214,14 +194,13 @@
         createPinAt(e.latlng);
     });
 
-    // HANDLE 2D CAMERA UPLOAD
+    // HANDLE 2D CAMERA UPLOAD FROM EXISTING PIN
     function process2DPhoto(event) {
         const file = event.target.files[0];
         if (!file) return;
 
         updateStatus("Uploading 2D Photo to Drive...");
         
-        // Convert image to Base64 so it can be sent as text
         const reader = new FileReader();
         reader.onload = function(e) {
             const base64Image = e.target.result;
@@ -230,18 +209,15 @@
                 method: 'POST',
                 mode: 'no-cors',
                 body: JSON.stringify({
-                    action: "create_2d",
+                    action: "attach_2d",
                     id: pendingPin.id,
                     name: pendingPin.name,
                     floor: floors[currentFloorIndex].name,
-                    x: pendingPin.latlng.lng,
-                    y: pendingPin.latlng.lat,
                     image: base64Image,
                     mimeType: file.type
                 })
             }).then(() => {
-                updateStatus("2D Photo Saved to Drive!");
-                addMarker(pendingPin.id, pendingPin.latlng, pendingPin.name, "2D");
+                updateStatus("2D Photo Saved & Attached!");
                 document.getElementById('cameraInput').value = ""; // Reset input
             });
         };
@@ -250,13 +226,15 @@
 
     function addMarker(id, latlng, name, type) {
         let m = L.marker(latlng, { draggable: true }).addTo(map);
-        m.id = id; // Store ID on marker for easy deletion
-        let tag = type === "2D" ? "📸" : "🌐";
+        m.id = id; // Store ID
+        m.pinName = name; // Store Name for camera references
         
         let popupContent = `
-            <div style="text-align:center;">
-                <b>${tag} ${name}</b><br><br>
-                <button onclick="deletePin(${id})" style="background:#e74c3c; color:white; border:none; padding:5px 10px; border-radius:4px; cursor:pointer;">🗑️ Delete Pin</button>
+            <div style="text-align:center; min-width: 130px;">
+                <b style="font-size: 14px; display:block; margin-bottom:10px;">📍 ${name}</b>
+                <button onclick="trigger360(${id})" style="background:#2c3e50; color:white; border:none; padding:8px; border-radius:4px; cursor:pointer; width:100%; margin-bottom:6px; font-weight:bold;">🌐 Snap 360</button>
+                <button onclick="trigger2D(${id})" style="background:#8e44ad; color:white; border:none; padding:8px; border-radius:4px; cursor:pointer; width:100%; margin-bottom:6px; font-weight:bold;">📸 Take 2D</button>
+                <button onclick="deletePin(${id})" style="background:#e74c3c; color:white; border:none; padding:8px; border-radius:4px; cursor:pointer; width:100%; font-weight:bold;">🗑️ Delete</button>
             </div>
         `;
         m.bindPopup(popupContent);
@@ -292,22 +270,26 @@
         updateStatus("Pin Deleted");
     };
 
-    function toggleMode() {
-        let btn = document.getElementById('modeBtn');
-        if (currentMode === "360") {
-            currentMode = "2D";
-            btn.innerText = "MODE: 2D PHOTO";
-            btn.style.background = "#8e44ad"; // Purple for 2D
-        } else if (currentMode === "2D") {
-            currentMode = "VIEW";
-            btn.innerText = "MODE: VIEW";
-            btn.style.background = "#e67e22"; // Orange for View
-        } else {
-            currentMode = "360";
-            btn.innerText = "MODE: 360 CAPTURE";
-            btn.style.background = "#2c3e50"; // Blue for 360
-        }
-    }
+    window.trigger360 = function(id) {
+        let marker = markers.find(m => m.id === id);
+        if(!marker) return;
+        
+        updateStatus("Triggering 360 Camera...");
+        fetch('http://192.168.1.1/osc/commands/execute', {
+            method: 'POST', mode: 'no-cors',
+            body: JSON.stringify({ name: "camera.takePicture" })
+        });
+        marker.closePopup();
+    };
+
+    window.trigger2D = function(id) {
+        let marker = markers.find(m => m.id === id);
+        if(!marker) return;
+        
+        pendingPin = { id: id, name: marker.pinName, latlng: marker.getLatLng() };
+        document.getElementById('cameraInput').click();
+        marker.closePopup();
+    };
 
     function updateStatus(msg) {
         document.getElementById('status').innerText = msg;
