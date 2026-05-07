@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Site Walk - Multi Camera</title>
-    
+    <link rel="icon" type="image/png" href="/favicon.png" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.css"/>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -44,6 +44,7 @@
         </div>
 
         <div class="controls-top">
+            <button class="btn" style="background: #27ae60; margin-bottom: 5px;" onclick="activatePinDrop()">📍 ADD PIN</button>
             <button class="btn" id="modeBtn" onclick="toggleMode()">MODE: 360 CAPTURE</button>
             <button class="btn btn-secondary" onclick="syncPhotos()">BATCH SYNC (360)</button>
         </div>
@@ -69,8 +70,10 @@
     let planOverlay = null;
     let markers = [];
     let pendingPin = {}; // Stores location while 2D photo is taken
+    let isAddingPin = false; // Tracks if the user clicked the Add Pin button
     
-    var map = L.map('map', { crs: L.CRS.Simple, minZoom: -2 });
+    // Disabled doubleClickZoom so it doesn't conflict with double-tap pinning
+    var map = L.map('map', { crs: L.CRS.Simple, minZoom: -2, doubleClickZoom: false });
 
     if (!SCRIPT_URL) {
         document.getElementById('loading').innerText = "Error: Missing ?api= in URL";
@@ -138,8 +141,17 @@
         loadFloor(document.getElementById('floorSelect').value);
     }
 
-    // MAIN TAP INTERACTION
-    map.on('click', function(e) {
+    function activatePinDrop() {
+        if (currentMode === "VIEW") {
+            alert("Switch to 360 or 2D mode to add pins.");
+            return;
+        }
+        isAddingPin = true;
+        document.getElementById('map').style.cursor = 'crosshair';
+        updateStatus("Tap the map to drop a pin...");
+    }
+
+    function createPinAt(latlng) {
         if (currentMode === "VIEW") return;
 
         let name = prompt("Name this pin for " + floors[currentFloorIndex].name + ":");
@@ -159,16 +171,32 @@
             // 2. Save location to Sheets (Photo stays on camera for batch sync)
             fetch(SCRIPT_URL, {
                 method: 'POST', mode: 'no-cors',
-                body: JSON.stringify({ action: "create", id: id, name: name, floor: floors[currentFloorIndex].name, x: e.latlng.lng, y: e.latlng.lat })
+                body: JSON.stringify({ action: "create", id: id, name: name, floor: floors[currentFloorIndex].name, x: latlng.lng, y: latlng.lat })
             }).then(() => updateStatus("Pinned: " + name));
 
-            addMarker(id, e.latlng, name, "360");
+            addMarker(id, latlng, name, "360");
             
         } else if (currentMode === "2D") {
             // Save info temporarily and open device camera
-            pendingPin = { id: id, name: name, latlng: e.latlng };
+            pendingPin = { id: id, name: name, latlng: latlng };
             document.getElementById('cameraInput').click();
         }
+    }
+
+    // MAIN TAP INTERACTION (Armed via button)
+    map.on('click', function(e) {
+        if (isAddingPin) {
+            isAddingPin = false; // Disarm the pin dropper
+            document.getElementById('map').style.cursor = ''; // Reset cursor
+            createPinAt(e.latlng);
+        }
+    });
+
+    // DOUBLE TAP / DOUBLE CLICK INTERACTION (Instant drop)
+    map.on('dblclick', function(e) {
+        isAddingPin = false; // Disarm single-click just in case it was active
+        document.getElementById('map').style.cursor = '';
+        createPinAt(e.latlng);
     });
 
     // HANDLE 2D CAMERA UPLOAD
