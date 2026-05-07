@@ -71,7 +71,6 @@
     let pendingPin = {}; // Stores location while 2D photo is taken
     
     var map = L.map('map', { crs: L.CRS.Simple, minZoom: -2 });
-    var bounds = [[0,0], [1000,1000]];
 
     if (!SCRIPT_URL) {
         document.getElementById('loading').innerText = "Error: Missing ?api= in URL";
@@ -97,14 +96,42 @@
         loadFloor(0);
     }
 
+    // --- UPDATED LOAD FLOOR FUNCTION ---
     function loadFloor(index) {
+        // 1. Remove old layers and markers
         if(planOverlay) map.removeLayer(planOverlay);
         markers.forEach(m => map.removeLayer(m));
         markers = [];
         currentFloorIndex = index;
-        planOverlay = L.imageOverlay(floors[index].url, bounds).addTo(map);
-        map.fitBounds(bounds);
-        updateStatus("Switched to " + floors[index].name);
+        
+        updateStatus("Loading drawing...");
+
+        // 2. Create a temporary image to measure the actual dimensions
+        let tempImg = new Image();
+        
+        tempImg.onload = function() {
+            // Get the true pixel dimensions of the blueprint
+            let imgHeight = this.height;
+            let imgWidth = this.width;
+
+            // Create dynamic bounds preserving the true aspect ratio
+            let dynamicBounds = [[0, 0], [imgHeight, imgWidth]];
+
+            // Draw the image on the map using the correct proportions
+            planOverlay = L.imageOverlay(this.src, dynamicBounds).addTo(map);
+            
+            // Auto-zoom the map to perfectly frame the drawing
+            map.fitBounds(dynamicBounds);
+            
+            updateStatus("Switched to " + floors[index].name);
+        };
+
+        tempImg.onerror = function() {
+            updateStatus("Error: Could not load drawing image.");
+        };
+
+        // 3. Trigger the image load using the Google Drive URL
+        tempImg.src = floors[index].url;
     }
 
     function changeFloor() {
@@ -223,4 +250,3 @@
 
 </body>
 </html>
-
