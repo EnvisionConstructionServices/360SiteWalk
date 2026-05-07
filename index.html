@@ -86,7 +86,7 @@
             <select id="floorSelect" onchange="changeFloor()"></select>
         </div>
 
-        <!-- Right: Filters, Role & Actions -->
+        <!-- Right: Filters & Actions -->
         <div class="top-bar-group">
             <label>Filter</label>
             <select id="pinFilter" onchange="applyFilter()">
@@ -96,10 +96,6 @@
                 <option value="360">🌐 360 Photos Only</option>
             </select>
             
-            <select id="roleSelect" onchange="changeRole()" style="background:#f39c12; color:white; border:none;">
-                <option value="TEAM">🛠️ Role: Team (Edit)</option>
-                <option value="SUB">👁️ Role: Sub (View)</option>
-            </select>
             <button class="btn btn-add" id="addPinBtn" onclick="activatePinDrop(event)">📍 ADD PIN</button>
             <button class="btn btn-secondary" id="syncBtn" onclick="syncPhotos()">BATCH SYNC</button>
         </div>
@@ -192,33 +188,11 @@
             select.appendChild(opt);
         });
 
-        document.getElementById('roleSelect').value = userRole;
-        if (userRole === 'SUB') {
-            document.getElementById('roleSelect').style.display = 'none';
-        }
-        changeRole();
-
-        loadFloor(0);
-    }
-
-    function changeRole() {
-        userRole = document.getElementById('roleSelect').value;
-        
+        // Apply UI permissions based on the silent URL role
         document.getElementById('addPinBtn').style.display = (userRole === 'TEAM') ? 'block' : 'none';
         document.getElementById('syncBtn').style.display = (userRole === 'TEAM') ? 'block' : 'none';
-        
-        if (userRole === 'SUB') {
-            isAddingPin = false;
-            document.getElementById('map').style.cursor = '';
-        }
 
-        markers.forEach(m => {
-            if (userRole === 'TEAM') m.dragging.enable();
-            else m.dragging.disable();
-            updateMarkerPopup(m);
-        });
-        
-        updateStatus(`View Switched to: ${userRole === 'TEAM' ? 'Editor' : 'Viewer'}`);
+        loadFloor(0);
     }
 
     function applyFilter() {
@@ -420,6 +394,13 @@
             });
             updateStatus("Position Updated");
         });
+
+        // NEW: Auto-open media viewer when selecting a photo pin
+        m.on('click', function() {
+            if (m.pinState === "2D" || m.pinState === "360") {
+                viewMedia(m.id);
+            }
+        });
     }
 
     function updateMarkerPopup(marker) {
@@ -456,14 +437,27 @@
     // SLIDES THE RIGHT PANEL OPEN TO VIEW MEDIA
     window.viewMedia = function(id) {
         let m = markers.find(x => x.id === id);
-        if(!m || !m.mediaData) return;
+        if(!m) return;
+        
+        // Prevent opening if it's empty
+        if (!m.mediaData && m.pinState !== '360') return;
 
         // Display the right panel as a flexbox item
         document.getElementById('viewer-container').style.display = 'flex';
-        document.getElementById('panorama').style.display = 'none';
         
-        document.getElementById('photo-viewer').style.display = 'block';
-        document.getElementById('photo-viewer').src = m.mediaData;
+        if (m.pinState === '360') {
+            document.getElementById('photo-viewer').style.display = 'none';
+            document.getElementById('panorama').style.display = 'block';
+            
+            if (!m.mediaData) {
+                // Placeholder for 360 until media is synced
+                document.getElementById('panorama').innerHTML = '<div style="color:#f39c12; display:flex; justify-content:center; align-items:center; height:100%; text-align:center; padding:20px; font-weight:bold; font-family:sans-serif; flex-direction:column; font-size:16px;">🌐<br><br>360 Photo Pending Sync<br><br><span style="font-size:12px;color:#bdc3c7;">(Media will appear here once batch uploaded)</span></div>';
+            }
+        } else if (m.pinState === '2D') {
+            document.getElementById('panorama').style.display = 'none';
+            document.getElementById('photo-viewer').style.display = 'block';
+            document.getElementById('photo-viewer').src = m.mediaData;
+        }
         
         // Force the map to recalculate its dimensions so it doesn't stretch or break
         setTimeout(() => map.invalidateSize(), 300);
