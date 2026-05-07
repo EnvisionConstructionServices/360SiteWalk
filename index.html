@@ -86,7 +86,12 @@
             <select id="floorSelect" onchange="changeFloor()"></select>
         </div>
 
-        <!-- Right: Filters & Actions -->
+        <!-- CENTER: Selected Pin Actions (Appears when pin is tapped) -->
+        <div class="top-bar-group" id="pin-actions-bar" style="display: none; background: #1a252f; padding: 6px 15px; border-radius: 8px; border: 1px solid #34495e; box-shadow: inset 0 2px 4px rgba(0,0,0,0.5);">
+            <!-- Dynamically populated via JavaScript -->
+        </div>
+
+        <!-- Right: Filters, Actions & Logo -->
         <div class="top-bar-group">
             <label>Filter</label>
             <select id="pinFilter" onchange="applyFilter()">
@@ -98,6 +103,12 @@
             
             <button class="btn btn-add" id="addPinBtn" onclick="activatePinDrop(event)">📍 ADD PIN</button>
             <button class="btn btn-secondary" id="syncBtn" onclick="syncPhotos()">BATCH SYNC</button>
+
+            <!-- Separator Line -->
+            <div style="width: 1px; height: 30px; background: #7f8c8d; margin: 0 5px;"></div>
+            
+            <!-- Company Logo -->
+            <img src="./envisionlogo.png" alt="Envision" style="height: 35px; object-fit: contain;">
         </div>
     </div>
 
@@ -110,7 +121,7 @@
 
         <!-- Side Panel Viewer -->
         <div id="viewer-container">
-            <button class="close-viewer-btn" onclick="closeViewer()" title="Close Viewer">✕</button>
+            <button class="close-viewer-btn" onclick="deselectPin()" title="Close Viewer">✕</button>
             <div id="panorama"></div>
             <img id="photo-viewer" style="display:none; width:100%; height:100%; object-fit:contain; background:#111;" />
         </div>
@@ -304,6 +315,9 @@
             isAddingPin = false; 
             document.getElementById('map').style.cursor = ''; 
             createPinAt(e.latlng);
+        } else {
+            // Clicking empty map space deselects the current pin
+            deselectPin();
         }
     });
 
@@ -349,13 +363,13 @@
                     marker.pinState = "2D";
                     marker.mediaData = base64Image;
                     marker.setIcon(icon2D);
-                    updateMarkerPopup(marker);
                     
                     if (currentFilter !== "ALL" && currentFilter !== "2D") {
                         map.removeLayer(marker);
                     }
                     
-                    viewMedia(pendingPin.id);
+                    // Refresh the top bar with new state
+                    selectPin(pendingPin.id);
                 }
             });
         };
@@ -375,7 +389,6 @@
         m.mediaData = pin.mediaData; 
         
         markers.push(m);
-        updateMarkerPopup(m);
 
         if (currentFilter === "ALL" || currentFilter === pin.state) {
             m.addTo(map);
@@ -395,44 +408,54 @@
             updateStatus("Position Updated");
         });
 
-        // NEW: Auto-open media viewer when selecting a photo pin
+        // Trigger the top bar menu when a pin is selected
         m.on('click', function() {
-            if (m.pinState === "2D" || m.pinState === "360") {
-                viewMedia(m.id);
-            }
+            selectPin(m.id);
         });
     }
 
-    function updateMarkerPopup(marker) {
-        let state = marker.pinState;
-        let id = marker.id;
+    window.selectPin = function(id) {
+        let marker = markers.find(m => m.id === id);
+        if(!marker) return;
 
+        let state = marker.pinState;
         let header = `📍 ${marker.pinName}`;
         if (state === "2D") header = `📷 ${marker.pinName} (2D)`;
         if (state === "360") header = `🌐 ${marker.pinName} (360)`;
 
-        let popupContent = `<div style="text-align:center; min-width: 140px;">
-            <b style="font-size: 14px; display:block; margin-bottom:10px;">${header}</b>`;
+        let actionsHtml = `<span style="font-weight:bold; margin-right: 15px; font-size: 14px; color: #ecf0f1;">${header}</span>`;
 
-        if (state === "2D") {
-            popupContent += `<button onclick="viewMedia(${id})" style="background:#2ecc71; color:white; border:none; padding:8px; border-radius:4px; cursor:pointer; width:100%; margin-bottom:6px; font-weight:bold;">👁️ View 2D Photo</button>`;
-        } else if (state === "360") {
-            popupContent += `<div style="background:#f39c12; color:white; padding:6px; border-radius:4px; font-size:11px; margin-bottom:6px;">360 Photo Pending Sync</div>`;
-        } else if (userRole === "SUB") {
-            popupContent += `<div style="color:#7f8c8d; font-size:12px; margin-bottom:6px; padding: 5px;">No photo attached yet.</div>`;
+        if (state === "360" && !marker.mediaData) {
+            actionsHtml += `<span style="color:#f39c12; font-size: 12px; margin-right:15px; font-weight:bold;">Pending Sync</span>`;
+        } else if (userRole === "SUB" && state === "EMPTY") {
+            actionsHtml += `<span style="color:#bdc3c7; font-size: 12px; margin-right:15px;">No photo attached</span>`;
         }
 
+        // Editor tools
         if (userRole === "TEAM") {
-            popupContent += `
-                <button onclick="trigger360(${id})" style="background:#2c3e50; color:white; border:none; padding:8px; border-radius:4px; cursor:pointer; width:100%; margin-bottom:6px; font-weight:bold;">${state === "360" ? "🔄 Retake 360" : "🌐 Snap 360"}</button>
-                <button onclick="trigger2D(${id})" style="background:#8e44ad; color:white; border:none; padding:8px; border-radius:4px; cursor:pointer; width:100%; margin-bottom:6px; font-weight:bold;">${state === "2D" ? "🔄 Retake 2D" : "📸 Take 2D"}</button>
-                <button onclick="deletePin(${id})" style="background:#e74c3c; color:white; border:none; padding:8px; border-radius:4px; cursor:pointer; width:100%; font-weight:bold;">🗑️ Delete</button>
-            `;
+            actionsHtml += `<button class="btn" style="background:#2980b9; margin-right:8px; padding: 6px 12px; font-size:12px;" onclick="trigger360(${id})">${state === "360" ? "🔄 Retake 360" : "🌐 Snap 360"}</button>`;
+            actionsHtml += `<button class="btn" style="background:#8e44ad; margin-right:8px; padding: 6px 12px; font-size:12px;" onclick="trigger2D(${id})">${state === "2D" ? "🔄 Retake 2D" : "📸 Take 2D"}</button>`;
+            actionsHtml += `<button class="btn" style="background:#e74c3c; margin-right:15px; padding: 6px 12px; font-size:12px;" onclick="deletePin(${id})">🗑️ Delete</button>`;
         }
 
-        popupContent += `</div>`;
-        marker.bindPopup(popupContent);
-    }
+        // Close Selection button
+        actionsHtml += `<button class="btn" style="background:transparent; border:2px solid #7f8c8d; padding: 4px 10px; color:#bdc3c7; border-radius: 50%; display:flex; align-items:center; justify-content:center;" onclick="deselectPin()" title="Deselect Pin">✕</button>`;
+
+        document.getElementById('pin-actions-bar').innerHTML = actionsHtml;
+        document.getElementById('pin-actions-bar').style.display = 'flex';
+
+        // Auto-open side viewer if it has media, otherwise cleanly close it
+        if (state === "2D" || state === "360") {
+            viewMedia(id);
+        } else {
+            closeViewer();
+        }
+    };
+
+    window.deselectPin = function() {
+        document.getElementById('pin-actions-bar').style.display = 'none';
+        closeViewer();
+    };
 
     // SLIDES THE RIGHT PANEL OPEN TO VIEW MEDIA
     window.viewMedia = function(id) {
@@ -489,6 +512,7 @@
         });
         
         updateStatus("Pin Deleted");
+        deselectPin(); // Clear the top bar after deleting
     };
 
     window.trigger360 = function(id) {
@@ -507,13 +531,13 @@
 
         marker.pinState = "360";
         marker.setIcon(icon360);
-        updateMarkerPopup(marker);
         
         if (currentFilter !== "ALL" && currentFilter !== "360") {
             map.removeLayer(marker);
+            deselectPin();
+        } else {
+            selectPin(id); // Refresh the top bar UI to show 'Pending Sync'
         }
-        
-        marker.closePopup();
     };
 
     window.trigger2D = function(id) {
@@ -523,7 +547,6 @@
         
         pendingPin = { id: id, name: marker.pinName, latlng: marker.getLatLng() };
         document.getElementById('cameraInput').click();
-        marker.closePopup();
     };
 
     function updateStatus(msg) {
